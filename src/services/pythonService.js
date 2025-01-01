@@ -3,6 +3,7 @@ const fs = require('fs').promises;
 const path = require('path');
 const FormData = require('form-data');
 const { PYTHON_BASE_URL } = require('../config/constants');
+const fileTransferService = require('./FileTransferService');
 const { cleanupFile } = require('../utils/fileUtils');
 
 class PythonService {
@@ -47,7 +48,6 @@ class PythonService {
 
   async processVideo(file, headers) {
     try {
-      // Upload video to Python backend for transcription
       const formData = new FormData();
       const fileBuffer = await fs.readFile(file.path);
       formData.append('file', fileBuffer, file.originalname);
@@ -63,17 +63,14 @@ class PythonService {
         }
       );
 
-      // Process the transcript
       const processResponse = await axios.post(
         `${PYTHON_BASE_URL}/process_resume`,
         { transcript_url: transcribeResponse.data.transcript_path },
         { headers }
       );
 
-      // Logging the resume path
       console.log('Resume path returned:', processResponse.data.resume_path);
 
-      // Download the resume file from the Python backend
       const resumeDownloadResponse = await axios.get(
         `${PYTHON_BASE_URL}/download_resume`,
         {
@@ -86,13 +83,11 @@ class PythonService {
       const resumeFilePath = path.join(__dirname, '..', 'downloads', path.basename(processResponse.data.resume_path));
       await fs.writeFile(resumeFilePath, resumeDownloadResponse.data);
 
-      // Create form data for recommendations using the downloaded resume file
       const recommendFormData = new FormData();
       const resumeFileBuffer = await fs.readFile(resumeFilePath);
       recommendFormData.append('resume', resumeFileBuffer, path.basename(resumeFilePath));
       recommendFormData.append('top_n', '5');
 
-      // Get recommendations
       const recommendResponse = await axios.post(
         `${PYTHON_BASE_URL}/recommend`,
         recommendFormData,
@@ -104,7 +99,6 @@ class PythonService {
         }
       );
 
-      // Cleanup local file
       await cleanupFile(file.path);
       await cleanupFile(resumeFilePath);
 
@@ -117,23 +111,22 @@ class PythonService {
 
   async processDocument(file, headers) {
     try {
-      // Extract text from document
-      const formData = new FormData();
-      const fileBuffer = await fs.readFile(file.path);
-      formData.append('file', fileBuffer, file.originalname);
+      // Move file to temp directory
+      const tempFilePath = await fileTransferService.moveFileToTemp(file);
 
+      // Call Python service to process the file
       const extractResponse = await axios.post(
         `${PYTHON_BASE_URL}/extract_text`,
-        formData,
+        {},
         { 
-          headers: {
-            ...headers,
-            ...formData.getHeaders()
+          headers,
+          params: {
+            filename: file.originalname
           }
         }
       );
 
-      // Create form data for recommendations using the extracted text
+      // Create form data for recommendations
       const recommendFormData = new FormData();
       recommendFormData.append('resume', JSON.stringify(extractResponse.data));
       recommendFormData.append('top_n', '5');
@@ -150,11 +143,13 @@ class PythonService {
         }
       );
 
-      // Cleanup uploaded file
-      await cleanupFile(file.path);
+      // Cleanup files
+      await fileTransferService.cleanupFiles([file.path, tempFilePath]);
 
       return recommendResponse.data;
     } catch (error) {
+      // Cleanup files even if processing fails
+      await fileTransferService.cleanupFiles([file.path]);
       throw new Error(`Document processing failed: ${error.message}`);
     }
   }

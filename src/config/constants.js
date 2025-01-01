@@ -1,4 +1,5 @@
 module.exports = {
-    PYTHON_BASE_URL: 'http://127.0.0.1:5000',
-    UPLOAD_DIR: 'uploads'
-  };
+  PYTHON_BASE_URL: 'http://localhost:5000',
+  UPLOAD_DIR: 'uploads',
+  TEMP_DIR: '/home/grootsadmin/prototype/temp'
+};
